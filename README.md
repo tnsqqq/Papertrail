@@ -1,4 +1,4 @@
-# RAG PDF
+# RAG Chatbot
 
 A small document question-answering app built with Node.js, Express, OpenAI embeddings, ChromaDB, and a Vite frontend.
 
