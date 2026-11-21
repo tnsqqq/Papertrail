@@ -33,6 +33,16 @@ function apiUrl(path) {
   return `${apiBaseUrl}${path}`;
 }
 
+async function readApiJson(response) {
+  const text = await response.text();
+  if (!text) throw new Error(`The API returned an empty response (${response.status}).`);
+  try {
+    return JSON.parse(text);
+  } catch {
+    throw new Error(`The API returned an invalid response (${response.status}).`);
+  }
+}
+
 let documents = [];
 let activeDocumentId = null;
 let isAsking = false;
@@ -169,7 +179,7 @@ function renderDocuments() {
 
 async function loadDocuments() {
   const response = await fetch(apiUrl('/api/documents'));
-  const result = await response.json();
+  const result = await readApiJson(response);
   if (!response.ok || !result.success) {
     throw new Error(result.error || 'Could not load documents.');
   }
@@ -181,7 +191,7 @@ async function loadDocuments() {
 async function checkConnection() {
   try {
     const response = await fetch(apiUrl('/api/status'));
-    const result = await response.json();
+    const result = await readApiJson(response);
     if (!response.ok || !result.success) {
       throw new Error(result.error || 'The API is unavailable.');
     }
@@ -216,7 +226,7 @@ async function uploadDocument(file) {
     const body = new FormData();
     body.append('file', file);
     const response = await fetch(apiUrl('/api/documents/upload'), { method: 'POST', body });
-    const result = await response.json();
+    const result = await readApiJson(response);
     if (!response.ok || !result.success) {
       throw new Error(result.error || 'The document could not be indexed.');
     }
@@ -239,7 +249,7 @@ async function deleteDocument(document) {
     const response = await fetch(apiUrl(`/api/documents/${encodeURIComponent(document.id)}`), {
       method: 'DELETE',
     });
-    const result = await response.json();
+    const result = await readApiJson(response);
     if (!response.ok || !result.success) {
       throw new Error(result.error || 'The document could not be deleted.');
     }
@@ -292,7 +302,7 @@ questionForm.addEventListener('submit', async (event) => {
         topK: 6,
       }),
     });
-    const result = await response.json();
+    const result = await readApiJson(response);
     if (!response.ok || !result.success) {
       throw new Error(result.error || 'Could not find an answer.');
     }

@@ -12,7 +12,8 @@
   },
   "dependencies": {
     "@neondatabase/serverless": "^1.0.2",
-    "pdfjs-dist": "4.8.69"
+    "pdfjs-dist": "4.8.69",
+    "unpdf": "^2.2.1"
   },
   "devDependencies": {
     "wrangler": "^4.50.0"

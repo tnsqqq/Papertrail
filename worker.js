@@ -64,16 +64,20 @@ function chunkText(text, maxChars = 2400, overlapChars = 480) {
 }
 
 async function extractPdf(arrayBuffer) {
-  const pdfjs = await import('pdfjs-dist/legacy/build/pdf.mjs');
-  const pdf = await pdfjs.getDocument({ data: new Uint8Array(arrayBuffer), useWorkerFetch: false, isEvalSupported: false }).promise;
-  const pages = [];
-  for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber += 1) {
-    const page = await pdf.getPage(pageNumber);
-    const content = await page.getTextContent();
-    const text = content.items.map((item) => item.str).join(' ').replace(/\s+/g, ' ').trim();
-    if (text) pages.push({ pageNumber, text });
-  }
-  return { text: pages.map((page) => page.text).join('\n\n'), numPages: pdf.numPages, pages };
+  const { extractText: extractPdfText, getDocumentProxy } = await import('unpdf');
+  const pdf = await getDocumentProxy(new Uint8Array(arrayBuffer), {
+    isEvalSupported: false,
+    maxImageSize: 16777216,
+  });
+  const result = await extractPdfText(pdf, { mergePages: false });
+  const pages = (Array.isArray(result.text) ? result.text : [result.text])
+    .map((text, index) => ({ pageNumber: index + 1, text: String(text || '').replace(/\s+/g, ' ').trim() }))
+    .filter((page) => page.text);
+  return {
+    text: pages.map((page) => page.text).join('\n\n'),
+    numPages: result.totalPages,
+    pages,
+  };
 }
 
 async function extractText(file) {
