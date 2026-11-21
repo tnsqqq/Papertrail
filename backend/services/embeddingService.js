@@ -7,9 +7,10 @@ dotenv.config();
 let openaiClient = null;
 
 function getOpenAIClient() {
-  if (!openaiClient && process.env.OPENAI_API_KEY && process.env.OPENAI_API_KEY.trim() !== '') {
+  const apiKey = process.env.OPENAI_API_KEY?.trim();
+  if (!openaiClient && apiKey?.startsWith('sk-')) {
     openaiClient = new OpenAI({
-      apiKey: process.env.OPENAI_API_KEY,
+      apiKey,
     });
   }
   return openaiClient;
@@ -64,13 +65,13 @@ function generateLocalDeterministicEmbedding(text, dimensions = 1536) {
  */
 export function isOpenAIConfigured() {
   const key = process.env.OPENAI_API_KEY;
-  return Boolean(key && key.trim().length > 0 && !key.includes('your_api_key'));
+  return Boolean(key && key.trim().startsWith('sk-') && !key.includes('your_api_key'));
 }
 
 /**
  * Generates an embedding for a single text query.
  * @param {string} text
- * @returns {Promise<number[]>} 1536-dimensional vector
+ * @returns {Promise<{ embedding: number[] }>}
  */
 export async function generateQueryEmbedding(text) {
   const model = process.env.OPENAI_EMBEDDING_MODEL || 'text-embedding-3-small';
@@ -82,32 +83,31 @@ export async function generateQueryEmbedding(text) {
         model,
         input: text.trim(),
       });
-      return response.data[0].embedding;
+      return { embedding: response.data[0].embedding };
     } catch (err) {
       console.warn(`[EmbeddingService] OpenAI embedding failed (${err.message}). Falling back to local test vector.`);
-      return generateLocalDeterministicEmbedding(text);
+      return { embedding: generateLocalDeterministicEmbedding(text) };
     }
   }
 
-  return generateLocalDeterministicEmbedding(text);
+  return { embedding: generateLocalDeterministicEmbedding(text) };
 }
 
 /**
  * Generates embeddings for an array of text chunks (with batching).
  * @param {string[]} texts
- * @returns {Promise<number[][]>} Array of 1536-dimensional vectors
+ * @returns {Promise<{ embeddings: number[][] }>}
  */
 export async function generateBatchEmbeddings(texts) {
-  if (!texts || texts.length === 0) return [];
+  if (!texts || texts.length === 0) return { embeddings: [] };
 
   const model = process.env.OPENAI_EMBEDDING_MODEL || 'text-embedding-3-small';
   const client = getOpenAIClient();
 
   if (client && isOpenAIConfigured() && process.env.EMBEDDING_PROVIDER !== 'local_test') {
+    const BATCH_SIZE = 50;
+    const allEmbeddings = [];
     try {
-      const BATCH_SIZE = 50;
-      const allEmbeddings = [];
-
       for (let i = 0; i < texts.length; i += BATCH_SIZE) {
         const batch = texts.slice(i, i + BATCH_SIZE);
         const response = await client.embeddings.create({
@@ -119,12 +119,12 @@ export async function generateBatchEmbeddings(texts) {
         }
       }
 
-      return allEmbeddings;
+      return { embeddings: allEmbeddings };
     } catch (err) {
       console.warn(`[EmbeddingService] OpenAI batch embedding failed (${err.message}). Falling back to local test vectors.`);
-      return texts.map((t) => generateLocalDeterministicEmbedding(t));
+      return { embeddings: texts.map((t) => generateLocalDeterministicEmbedding(t)) };
     }
   }
 
-  return texts.map((t) => generateLocalDeterministicEmbedding(t));
+  return { embeddings: texts.map((t) => generateLocalDeterministicEmbedding(t)) };
 }

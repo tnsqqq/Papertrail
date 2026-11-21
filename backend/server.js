@@ -1,9 +1,8 @@
 import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
-import path from 'path';
-import net from 'net';
-import { fileURLToPath } from 'url';
+import { rateLimit } from 'express-rate-limit';
+import helmet from 'helmet';
 import multer from 'multer';
 
 import { initVectorStore } from './services/chromaService.js';
@@ -13,48 +12,36 @@ import statusRoutes from './routes/statusRoutes.js';
 
 dotenv.config();
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-
 const app = express();
 const DEFAULT_PORT = Number(process.env.PORT || 5000);
 
-async function getAvailablePort(startPort) {
-  return new Promise((resolve, reject) => {
-    const server = net.createServer();
-
-    server.once('error', (error) => {
-      if (error.code === 'EADDRINUSE') {
-        resolve(getAvailablePort(startPort + 1));
-        return;
-      }
-
-      reject(error);
-    });
-
-    server.listen(startPort, '0.0.0.0', () => {
-      const { port } = server.address();
-      server.close(() => resolve(port));
-    });
+function createRateLimiter(limit) {
+  return rateLimit({
+    windowMs: 15 * 60 * 1000,
+    limit,
+    standardHeaders: 'draft-8',
+    legacyHeaders: false,
+    handler: (req, res) => {
+      res.status(429).json({
+        success: false,
+        error: 'Too many requests. Please try again later.',
+      });
+    },
   });
 }
 
-// Enable CORS for frontend development
 app.use(
   cors({
-    origin: true, // Allow all origins for dev flexibility
-    credentials: true,
+    origin: process.env.FRONTEND_ORIGIN || 'http://localhost:3000',
   })
 );
+app.use(helmet());
 
-// Body parsing middleware
-app.use(express.json({ limit: '25mb' }));
-app.use(express.urlencoded({ extended: true, limit: '25mb' }));
+app.use(express.json({ limit: '1mb' }));
+app.use('/api', createRateLimiter(300));
+app.use('/api/query', createRateLimiter(30));
+app.use('/api/documents/upload', createRateLimiter(10));
 
-// Static file hosting for uploaded files preview
-app.use('/api/uploads', express.static(path.join(__dirname, 'uploads')));
-
-// Health check endpoint
 app.get('/health', (req, res) => {
   res.json({
     status: 'healthy',
@@ -63,12 +50,10 @@ app.get('/health', (req, res) => {
   });
 });
 
-// Register API Routes
 app.use('/api/documents', documentRoutes);
 app.use('/api/query', queryRoutes);
 app.use('/api/status', statusRoutes);
 
-// Root informational endpoint
 app.get('/', (req, res) => {
   res.json({
     name: 'Document RAG API Server',
@@ -86,11 +71,14 @@ app.get('/', (req, res) => {
   });
 });
 
-// Multer & General Error Handling Middleware
+app.use((req, res) => {
+  res.status(404).json({ success: false, error: 'API route not found.' });
+});
+
 app.use((err, req, res, next) => {
   if (err instanceof multer.MulterError) {
     if (err.code === 'LIMIT_FILE_SIZE') {
-      return res.status(400).json({
+      return res.status(413).json({
         success: false,
         error: 'File is too large. Maximum allowed size is 10 MB.',
       });
@@ -102,10 +90,14 @@ app.use((err, req, res, next) => {
   }
 
   if (err) {
-    console.error('[Unhandled Server Error]', err);
-    return res.status(err.status || 500).json({
+    const requestedStatus = Number(err.status);
+    const status = Number.isInteger(requestedStatus) && requestedStatus >= 400 && requestedStatus <= 599
+      ? requestedStatus
+      : 500;
+    if (status >= 500) console.error('[Unhandled Server Error]', err);
+    return res.status(status).json({
       success: false,
-      error: err.message || 'Internal server error occurred.',
+      error: status >= 500 ? 'Internal server error.' : err.message || 'Invalid request.',
     });
   }
 
@@ -115,20 +107,21 @@ app.use((err, req, res, next) => {
 // Initialize vector store and start listening
 async function startServer() {
   try {
+    if (!Number.isInteger(DEFAULT_PORT) || DEFAULT_PORT < 1 || DEFAULT_PORT > 65535) {
+      throw new Error('PORT must be an integer between 1 and 65535.');
+    }
     console.log('--- Initializing Document RAG Backend ---');
     await initVectorStore();
 
-    const port = await getAvailablePort(DEFAULT_PORT);
-    const resolvedPort = Number(port);
-
-    app.listen(resolvedPort, () => {
-      const chosenPort = resolvedPort;
-      const portMessage = chosenPort === DEFAULT_PORT ? `http://localhost:${chosenPort}` : `http://localhost:${chosenPort} (fallback from port ${DEFAULT_PORT})`;
-      console.log(`\n Document RAG Backend running at: ${portMessage}`);
-      console.log(` Health check: http://localhost:${chosenPort}/health`);
-      console.log(` System status: http://localhost:${chosenPort}/api/status`);
-      console.log(` API endpoints ready for PDF & TXT indexing and queries\n`);
+    const server = await new Promise((resolve, reject) => {
+      const instance = app.listen(DEFAULT_PORT, '127.0.0.1', () => resolve(instance));
+      instance.once('error', reject);
     });
+
+    const { port } = server.address();
+    console.log(`\nDocument RAG backend running at: http://localhost:${port}`);
+    console.log(`Health check: http://localhost:${port}/health`);
+    console.log(`System status: http://localhost:${port}/api/status`);
   } catch (error) {
     console.error('Failed to start server:', error);
     process.exit(1);

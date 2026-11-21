@@ -1,0 +1,20 @@
+name = "papertrail-api"
+main = "worker.js"
+pages_build_output_dir = "frontend/dist"
+compatibility_date = "2025-11-21"
+compatibility_flags = ["nodejs_compat"]
+
+[[kv_namespaces]]
+binding = "PUBLIC_RATE_LIMIT"
+id = "b6919062ddda4cc5b9b90f8124052adf"
+
+[vars]
+FRONTEND_ORIGIN = "https://papertrail-e2c.pages.dev"
+DOCUMENT_TTL_HOURS = "24"
+MAX_UPLOAD_BYTES = "5242880"
+PUBLIC_UPLOADS_PER_HOUR = "3"
+PUBLIC_QUERIES_PER_HOUR = "30"
+
+[triggers]
+crons = ["0 * * * *"]
+

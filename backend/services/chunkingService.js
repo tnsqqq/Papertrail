@@ -41,10 +41,10 @@ export function estimateTokens(text) {
  * @returns {Array<{ chunkId: string, documentId: string, filename: string, page: number, chunkIndex: number, text: string, tokenCount: number }>}
  */
 export function chunkDocument(docData, documentId, filename, options = {}) {
-  const maxTokens = options.maxTokens || 600;
-  const overlapTokens = options.overlapTokens || 120;
+  const maxTokens = Number.isInteger(options.maxTokens) && options.maxTokens > 0 ? options.maxTokens : 600;
+  const overlapTokens = Number.isInteger(options.overlapTokens) && options.overlapTokens >= 0 ? options.overlapTokens : 120;
   const maxChars = maxTokens * 4;
-  const overlapChars = overlapTokens * 4;
+  const overlapChars = Math.min(overlapTokens * 4, maxChars - 1);
 
   const chunks = [];
   let globalChunkIndex = 0;
@@ -87,6 +87,37 @@ export function chunkDocument(docData, documentId, filename, options = {}) {
         let subChunkLength = 0;
 
         for (const word of words) {
+          if (word.length > maxChars) {
+            if (subChunkWords.length > 0) {
+              const chunkText = subChunkWords.join(' ');
+              chunks.push({
+                chunkId: uuidv4(),
+                documentId,
+                filename,
+                page: pageNumber,
+                chunkIndex: globalChunkIndex++,
+                text: chunkText,
+                tokenCount: estimateTokens(chunkText),
+              });
+              subChunkWords = [];
+              subChunkLength = 0;
+            }
+
+            for (let start = 0; start < word.length; start += maxChars) {
+              const chunkText = word.slice(start, start + maxChars);
+              chunks.push({
+                chunkId: uuidv4(),
+                documentId,
+                filename,
+                page: pageNumber,
+                chunkIndex: globalChunkIndex++,
+                text: chunkText,
+                tokenCount: estimateTokens(chunkText),
+              });
+            }
+            continue;
+          }
+
           if (subChunkLength + word.length + 1 > maxChars && subChunkWords.length > 0) {
             const chunkText = subChunkWords.join(' ');
             chunks.push({
@@ -98,9 +129,11 @@ export function chunkDocument(docData, documentId, filename, options = {}) {
               text: chunkText,
               tokenCount: estimateTokens(chunkText),
             });
-            // Overlap by words
-            const overlapWordCount = Math.floor(overlapChars / 6);
-            subChunkWords = subChunkWords.slice(-overlapWordCount);
+            const overlapWordCount = Math.min(
+              Math.floor(overlapChars / 6),
+              Math.max(subChunkWords.length - 1, 0)
+            );
+            subChunkWords = overlapWordCount > 0 ? subChunkWords.slice(-overlapWordCount) : [];
             subChunkLength = subChunkWords.join(' ').length;
           }
           subChunkWords.push(word);
@@ -171,19 +204,6 @@ export function chunkDocument(docData, documentId, filename, options = {}) {
         });
       }
     }
-  }
-
-  // Fallback: If document was empty or somehow produced 0 chunks, add empty placeholder
-  if (chunks.length === 0 && docData.fullText) {
-    chunks.push({
-      chunkId: uuidv4(),
-      documentId,
-      filename,
-      page: 1,
-      chunkIndex: 0,
-      text: docData.fullText.substring(0, maxChars),
-      tokenCount: estimateTokens(docData.fullText.substring(0, maxChars)),
-    });
   }
 
   return chunks;

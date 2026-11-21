@@ -1,16 +1,36 @@
 import path from 'path';
-import fs from 'fs';
+import fs from 'fs/promises';
+import { fileURLToPath } from 'url';
 import { v4 as uuidv4 } from 'uuid';
 import { extractDocumentText } from '../services/pdfService.js';
 import { chunkDocument } from '../services/chunkingService.js';
 import { generateBatchEmbeddings } from '../services/embeddingService.js';
 import {
   addDocumentChunks,
-  getAllDocuments,
   getDocumentById,
+  getAllDocuments,
   getDocumentChunks,
   deleteDocument as deleteFromVectorStore,
 } from '../services/chromaService.js';
+
+const uploadDir = path.resolve(
+  process.env.RAG_STORAGE_DIR?.trim() || path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'uploads')
+);
+
+async function removeStoredFile(filename) {
+  if (!filename) return;
+
+  const safeFilename = path.basename(filename);
+  if (safeFilename !== filename) {
+    throw new Error('Stored document filename is invalid.');
+  }
+
+  try {
+    await fs.unlink(path.join(uploadDir, safeFilename));
+  } catch (error) {
+    if (error.code !== 'ENOENT') throw error;
+  }
+}
 
 /**
  * Handles uploading and processing a PDF or TXT document.
@@ -33,11 +53,10 @@ export async function uploadDocument(req, res) {
     const extracted = await extractDocumentText(filePath);
 
     if (!extracted.fullText || extracted.fullText.trim().length === 0) {
-      // Remove empty uploaded file
-      if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+      await removeStoredFile(storedFilename);
       return res.status(422).json({
         success: false,
-        error: 'The uploaded document contains no readable text or is an image-only scan.',
+        error: 'No readable text was found, even after trying OCR. Check that the PDF pages are clear enough to read.',
       });
     }
 
@@ -51,14 +70,14 @@ export async function uploadDocument(req, res) {
 
     // 3. Generate embeddings for all chunks
     const chunkTexts = chunks.map((c) => c.text);
-    const embeddings = await generateBatchEmbeddings(chunkTexts);
+    const { embeddings } = await generateBatchEmbeddings(chunkTexts);
 
     // 4. Index in Vector Store
     const documentInfo = {
       documentId,
       filename: originalname,
-      storedFilename,
       originalName: originalname,
+      storedFilename,
       numPages: extracted.numPages,
       fileSize: size,
       mimeType: mimetype,
@@ -82,17 +101,16 @@ export async function uploadDocument(req, res) {
     });
   } catch (error) {
     console.error('[Upload Error]', error);
-    // Cleanup file if an error occurred during processing
-    if (req.file && req.file.path && fs.existsSync(req.file.path)) {
+    if (req.file?.filename) {
       try {
-        fs.unlinkSync(req.file.path);
-      } catch (e) {
-        // ignore
+        await removeStoredFile(req.file.filename);
+      } catch (cleanupError) {
+        console.error('[Upload Cleanup Error]', cleanupError);
       }
     }
     return res.status(500).json({
       success: false,
-      error: `Failed to process document: ${error.message}`,
+      error: 'Failed to process this document. Please check the file and try again.',
     });
   }
 }
@@ -132,11 +150,12 @@ export async function getDocumentDetails(req, res) {
       });
     }
 
+    const { ownerId, storedFilename, ...document } = doc;
     const chunks = getDocumentChunks(id);
 
     return res.json({
       success: true,
-      document: doc,
+      document,
       chunks,
     });
   } catch (error) {
@@ -163,20 +182,8 @@ export async function deleteDocument(req, res) {
       });
     }
 
-    // Delete from vector store
+    await removeStoredFile(doc.storedFilename);
     await deleteFromVectorStore(id);
-
-    // Remove stored physical file if found
-    if (doc.storedFilename) {
-      const filePath = path.join(path.dirname(doc.storedFilename), '..', 'uploads', doc.storedFilename);
-      if (fs.existsSync(filePath)) {
-        try {
-          fs.unlinkSync(filePath);
-        } catch (e) {
-          console.warn('[Delete] Could not remove file on disk:', e.message);
-        }
-      }
-    }
 
     return res.json({
       success: true,

@@ -3,12 +3,15 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import dotenv from 'dotenv';
+import { rankRetrievedChunks } from './retrievalService.js';
 
 dotenv.config();
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-const storageDir = path.join(__dirname, '..', 'uploads');
+const storageDir = path.resolve(
+  process.env.RAG_STORAGE_DIR?.trim() || path.join(__dirname, '..', 'uploads')
+);
 const localStorePath = path.join(storageDir, 'vector_store.json');
 const docsMetaPath = path.join(storageDir, 'documents_meta.json');
 
@@ -32,7 +35,11 @@ let documentsMeta = {}; // documentId -> { id, filename, originalName, numPages,
 try {
   if (fs.existsSync(localStorePath)) {
     const raw = fs.readFileSync(localStorePath, 'utf-8');
-    localStore = JSON.parse(raw);
+    const storedData = JSON.parse(raw);
+    if (!storedData || !Array.isArray(storedData.chunks)) {
+      throw new Error('Local vector store must contain a chunks array.');
+    }
+    localStore = storedData;
     console.log(`[VectorStore] Loaded ${localStore.chunks.length} cached chunks from disk.`);
   }
 } catch (e) {
@@ -42,7 +49,11 @@ try {
 try {
   if (fs.existsSync(docsMetaPath)) {
     const raw = fs.readFileSync(docsMetaPath, 'utf-8');
-    documentsMeta = JSON.parse(raw);
+    const storedData = JSON.parse(raw);
+    if (!storedData || Array.isArray(storedData) || typeof storedData !== 'object') {
+      throw new Error('Document metadata must be an object.');
+    }
+    documentsMeta = storedData;
     console.log(`[VectorStore] Loaded metadata for ${Object.keys(documentsMeta).length} documents.`);
   }
 } catch (e) {
@@ -54,6 +65,7 @@ function persistLocalStore() {
     fs.writeFileSync(localStorePath, JSON.stringify(localStore, null, 2), 'utf-8');
   } catch (err) {
     console.error('[VectorStore] Failed to persist local vector store:', err.message);
+    throw err;
   }
 }
 
@@ -62,6 +74,7 @@ function persistDocumentsMeta() {
     fs.writeFileSync(docsMetaPath, JSON.stringify(documentsMeta, null, 2), 'utf-8');
   } catch (err) {
     console.error('[VectorStore] Failed to persist documents metadata:', err.message);
+    throw err;
   }
 }
 
@@ -87,8 +100,15 @@ function cosineSimilarity(vecA, vecB) {
  * Tries ChromaDB; if unreachable, gracefully continues with local fallback.
  */
 export async function initVectorStore() {
-  const chromaUrl = process.env.CHROMA_URL || 'http://localhost:8000';
   const collectionName = process.env.CHROMA_COLLECTION_NAME || 'document_rag_collection';
+  if (process.env.RAG_DISABLE_CHROMA === 'true') {
+    isChromaConnected = false;
+    chromaClient = null;
+    chromaCollection = null;
+    return { connected: false, provider: 'local_resilient_store', collection: collectionName };
+  }
+
+  const chromaUrl = process.env.CHROMA_URL || 'http://localhost:8000';
 
   try {
     const parsedUrl = new URL(chromaUrl);
@@ -129,6 +149,9 @@ export async function initVectorStore() {
  */
 export async function addDocumentChunks(chunks, embeddings, documentInfo) {
   if (!chunks || chunks.length === 0) return { insertedCount: 0 };
+  if (!Array.isArray(embeddings) || embeddings.length !== chunks.length || embeddings.some((vector) => !Array.isArray(vector) || vector.length === 0)) {
+    throw new Error('Each document chunk must have a matching non-empty embedding.');
+  }
 
   // Save document metadata
   if (documentInfo && documentInfo.documentId) {
@@ -136,6 +159,7 @@ export async function addDocumentChunks(chunks, embeddings, documentInfo) {
       id: documentInfo.documentId,
       filename: documentInfo.filename,
       originalName: documentInfo.originalName || documentInfo.filename,
+      storedFilename: documentInfo.storedFilename,
       numPages: documentInfo.numPages || 1,
       totalChunks: chunks.length,
       totalTokens: chunks.reduce((acc, c) => acc + (c.tokenCount || 0), 0),
@@ -171,32 +195,30 @@ export async function addDocumentChunks(chunks, embeddings, documentInfo) {
   }
   persistLocalStore();
 
-  // Also write to ChromaDB if available
-  if (isChromaConnected && chromaCollection) {
-    try {
-      const ids = chunks.map((c) => c.chunkId);
-      const docs = chunks.map((c) => c.text);
-      const metadatas = chunks.map((c) => ({
-        documentId: String(c.documentId),
-        filename: String(c.filename),
-        page: Number(c.page),
-        chunkIndex: Number(c.chunkIndex),
-        tokenCount: Number(c.tokenCount),
-      }));
-
-      await chromaCollection.upsert({
-        ids,
-        embeddings,
-        metadatas,
-        documents: docs,
-      });
-      console.log(`[ChromaDB] Upserted ${chunks.length} chunks to Chroma collection.`);
-    } catch (err) {
-      console.warn(`[ChromaDB] Failed to upsert to ChromaDB (${err.message}). Local fallback was updated.`);
-    }
-  }
+  await upsertChunksToChroma(chunks, embeddings);
 
   return { insertedCount: chunks.length };
+}
+
+async function upsertChunksToChroma(chunks, embeddings) {
+  if (!isChromaConnected || !chromaCollection || chunks.length === 0) return;
+  try {
+    await chromaCollection.upsert({
+      ids: chunks.map((chunk) => chunk.chunkId),
+      embeddings,
+      documents: chunks.map((chunk) => chunk.text),
+      metadatas: chunks.map((chunk) => ({
+        documentId: String(chunk.documentId),
+        filename: String(chunk.filename),
+        page: Number(chunk.page),
+        chunkIndex: Number(chunk.chunkIndex),
+        tokenCount: Number(chunk.tokenCount),
+      })),
+    });
+    console.log(`[ChromaDB] Upserted ${chunks.length} chunks to Chroma collection.`);
+  } catch (err) {
+    console.warn(`[ChromaDB] Failed to upsert to ChromaDB (${err.message}), local fallback was updated.`);
+  }
 }
 
 /**
@@ -207,18 +229,16 @@ export async function addDocumentChunks(chunks, embeddings, documentInfo) {
  * @param {string} [filterDocumentId=null] Optional documentId to scope search
  * @returns {Promise<Array<{ chunkId: string, documentId: string, filename: string, page: number, chunkIndex: number, text: string, similarity: number }>>}
  */
-export async function querySimilarChunks(queryEmbedding, topK = 5, filterDocumentId = null) {
+async function searchSimilarChunks(queryEmbedding, topK, filterDocumentId, queryText) {
   // If ChromaDB is connected, attempt query via ChromaDB
   if (isChromaConnected && chromaCollection) {
     try {
       const queryParams = {
         queryEmbeddings: [queryEmbedding],
-        nResults: Math.min(topK * 2, 50),
+        nResults: Math.min(topK * 4, 100),
       };
 
-      if (filterDocumentId) {
-        queryParams.where = { documentId: filterDocumentId };
-      }
+      if (filterDocumentId) queryParams.where = { documentId: filterDocumentId };
 
       const results = await chromaCollection.query(queryParams);
 
@@ -243,8 +263,7 @@ export async function querySimilarChunks(queryEmbedding, topK = 5, filterDocumen
           };
         });
 
-        hits.sort((a, b) => b.similarity - a.similarity);
-        return hits.slice(0, topK);
+        return rankRetrievedChunks(queryText, hits, topK);
       }
     } catch (err) {
       console.warn(`[ChromaDB] Chroma query failed (${err.message}), evaluating with local cosine store.`);
@@ -252,10 +271,9 @@ export async function querySimilarChunks(queryEmbedding, topK = 5, filterDocumen
   }
 
   // Local fallback: compute cosine similarity against stored chunks
-  let candidateChunks = localStore.chunks;
-  if (filterDocumentId) {
-    candidateChunks = candidateChunks.filter((c) => c.documentId === filterDocumentId);
-  }
+  const candidateChunks = localStore.chunks.filter((chunk) => (
+    !filterDocumentId || chunk.documentId === filterDocumentId
+  ));
 
   const scored = candidateChunks.map((chunk) => {
     const sim = cosineSimilarity(queryEmbedding, chunk.embedding);
@@ -270,17 +288,20 @@ export async function querySimilarChunks(queryEmbedding, topK = 5, filterDocumen
     };
   });
 
-  scored.sort((a, b) => b.similarity - a.similarity);
-  return scored.slice(0, topK);
+  return rankRetrievedChunks(queryText, scored, topK);
+}
+
+export async function querySimilarChunks(queryEmbedding, topK = 5, filterDocumentId = null, queryText = '') {
+  return searchSimilarChunks(queryEmbedding, topK, filterDocumentId, queryText);
 }
 
 /**
  * Retrieves all registered documents.
  */
 export function getAllDocuments() {
-  return Object.values(documentsMeta).sort(
-    (a, b) => new Date(b.uploadedAt).getTime() - new Date(a.uploadedAt).getTime()
-  );
+  return Object.values(documentsMeta)
+    .sort((a, b) => new Date(b.uploadedAt).getTime() - new Date(a.uploadedAt).getTime())
+    .map(({ ownerId, storedFilename, ...document }) => document);
 }
 
 /**
@@ -290,21 +311,19 @@ export function getDocumentById(documentId) {
   return documentsMeta[documentId] || null;
 }
 
-/**
- * Retrieves all chunks for a document.
- */
 export function getDocumentChunks(documentId) {
+  if (!documentsMeta[documentId]) return [];
   return localStore.chunks
-    .filter((c) => c.documentId === documentId)
+    .filter((chunk) => chunk.documentId === documentId)
     .sort((a, b) => a.chunkIndex - b.chunkIndex)
-    .map((c) => ({
-      chunkId: c.chunkId,
-      documentId: c.documentId,
-      filename: c.filename,
-      page: c.page,
-      chunkIndex: c.chunkIndex,
-      text: c.text,
-      tokenCount: c.tokenCount,
+    .map((chunk) => ({
+      chunkId: chunk.chunkId,
+      documentId: chunk.documentId,
+      filename: chunk.filename,
+      page: chunk.page,
+      chunkIndex: chunk.chunkIndex,
+      text: chunk.text,
+      tokenCount: chunk.tokenCount,
     }));
 }
 
@@ -313,6 +332,7 @@ export function getDocumentChunks(documentId) {
  */
 export async function deleteDocument(documentId) {
   const existed = Boolean(documentsMeta[documentId]);
+  if (!existed) return { success: true, deleted: false };
   delete documentsMeta[documentId];
   persistDocumentsMeta();
 
@@ -322,7 +342,7 @@ export async function deleteDocument(documentId) {
   if (isChromaConnected && chromaCollection) {
     try {
       await chromaCollection.delete({
-        where: { documentId: documentId },
+        where: { documentId },
       });
       console.log(`[ChromaDB] Deleted chunks for documentId ${documentId}`);
     } catch (err) {
@@ -337,13 +357,14 @@ export async function deleteDocument(documentId) {
  * Returns overall vector store statistics and connectivity.
  */
 export function getVectorStoreStats() {
+  const allChunks = localStore.chunks;
   return {
     isChromaConnected,
     provider: isChromaConnected ? 'chromadb' : 'local_resilient_store',
     chromaUrl: process.env.CHROMA_URL || 'http://localhost:8000',
     collectionName: process.env.CHROMA_COLLECTION_NAME || 'document_rag_collection',
     totalDocuments: Object.keys(documentsMeta).length,
-    totalChunks: localStore.chunks.length,
-    totalTokensIndexed: localStore.chunks.reduce((acc, c) => acc + (c.tokenCount || 0), 0),
+    totalChunks: allChunks.length,
+    totalTokensIndexed: allChunks.reduce((acc, chunk) => acc + (chunk.tokenCount || 0), 0),
   };
 }

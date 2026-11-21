@@ -1,6 +1,7 @@
-import fs from 'fs';
+import { readFile } from 'fs/promises';
 import path from 'path';
 import pdfParse from 'pdf-parse';
+import { recognizeScannedPages } from './ocrService.js';
 
 /**
  * Extracts text from a PDF file preserving individual page numbers.
@@ -8,7 +9,7 @@ import pdfParse from 'pdf-parse';
  * @returns {Promise<{ numPages: number, pages: Array<{ pageNumber: number, text: string }>, fullText: string }>}
  */
 export async function extractTextFromPdf(filePath) {
-  const dataBuffer = fs.readFileSync(filePath);
+  const dataBuffer = await readFile(filePath);
   const pages = [];
 
   const options = {
@@ -44,13 +45,17 @@ export async function extractTextFromPdf(filePath) {
 
   try {
     const data = await pdfParse(dataBuffer, options);
-    // Sort pages by page number ascending
     pages.sort((a, b) => a.pageNumber - b.pageNumber);
+    const extractedPages = pages.length > 0
+      ? pages
+      : [{ pageNumber: 1, text: (data.text || '').trim() }];
+    const ocrApplied = await recognizeScannedPages(dataBuffer, extractedPages);
+    const pageText = extractedPages.map((page) => page.text).filter(Boolean).join('\n\n');
 
     return {
-      numPages: data.numpages || pages.length,
-      pages: pages.length > 0 ? pages : [{ pageNumber: 1, text: (data.text || '').trim() }],
-      fullText: data.text || '',
+      numPages: data.numpages || extractedPages.length,
+      pages: extractedPages,
+      fullText: ocrApplied ? pageText : data.text || pageText,
     };
   } catch (error) {
     throw new Error(`Failed to parse PDF document: ${error.message}`);
@@ -64,7 +69,7 @@ export async function extractTextFromPdf(filePath) {
  */
 export async function extractTextFromTxt(filePath) {
   try {
-    const content = fs.readFileSync(filePath, 'utf-8');
+    const content = await readFile(filePath, 'utf-8');
     const cleanText = content.trim();
 
     return {

@@ -1,40 +1,54 @@
 import { generateQueryEmbedding } from '../services/embeddingService.js';
-import { querySimilarChunks } from '../services/chromaService.js';
+import { getDocumentById, querySimilarChunks } from '../services/chromaService.js';
 import { generateRAGAnswer, streamRAGAnswer } from '../services/ragService.js';
+
+const configuredTopK = Number(process.env.TOP_K || 5);
+const DEFAULT_TOP_K = Number.isFinite(configuredTopK) && configuredTopK > 0 ? configuredTopK : 5;
+function getTopK(value) {
+  const requestedTopK = Number(value);
+  const topK = Number.isFinite(requestedTopK) && requestedTopK > 0 ? requestedTopK : DEFAULT_TOP_K;
+  return Math.max(1, Math.min(topK, 20));
+}
 
 /**
  * Handles standard JSON question answering over documents.
  */
 export async function askQuestion(req, res) {
   try {
-    const { query, documentId = null, topK = 5, history = [] } = req.body;
+    const { query, documentId = null, topK } = req.body || {};
 
-    if (!query || typeof query !== 'string' || query.trim().length === 0) {
+    if (typeof query !== 'string' || query.trim().length === 0 || query.length > 2000) {
       return res.status(400).json({
         success: false,
-        error: 'Please provide a valid question in the "query" field.',
+        error: 'Please provide a question between 1 and 2000 characters.',
       });
     }
+    if (documentId !== null && typeof documentId !== 'string') {
+      return res.status(400).json({ success: false, error: 'documentId must be a string or null.' });
+    }
+    if (documentId && !getDocumentById(documentId)) {
+      return res.status(404).json({ success: false, error: 'Document not found.' });
+    }
 
-    const parsedTopK = Math.max(1, Math.min(Number(topK) || 5, 20));
+    const parsedTopK = getTopK(topK);
 
     // 1. Generate embedding for user query
-    const queryVector = await generateQueryEmbedding(query.trim());
+    const { embedding: queryVector } = await generateQueryEmbedding(query.trim());
 
     // 2. Retrieve top-k most relevant chunks
-    const retrievedChunks = await querySimilarChunks(queryVector, parsedTopK, documentId || null);
+    const retrievedChunks = await querySimilarChunks(queryVector, parsedTopK, documentId || null, query.trim());
 
     // 3. Generate synthesized answer with citations
     const result = await generateRAGAnswer({
       query: query.trim(),
       retrievedChunks,
-      conversationHistory: history,
     });
-
     return res.json({
       success: true,
       query: query.trim(),
       answer: result.answer,
+      provider: result.provider,
+      model: result.model || null,
       sources: result.sources || [],
       metadata: {
         provider: result.provider,
@@ -47,7 +61,7 @@ export async function askQuestion(req, res) {
     console.error('[Query Error]', error);
     return res.status(500).json({
       success: false,
-      error: `Failed to answer query: ${error.message}`,
+      error: 'Failed to answer the question. Please try again.',
     });
   }
 }
@@ -57,16 +71,22 @@ export async function askQuestion(req, res) {
  */
 export async function askQuestionStream(req, res) {
   try {
-    const { query, documentId = null, topK = 5, history = [] } = req.body;
+    const { query, documentId = null, topK } = req.body || {};
 
-    if (!query || typeof query !== 'string' || query.trim().length === 0) {
+    if (typeof query !== 'string' || query.trim().length === 0 || query.length > 2000) {
       return res.status(400).json({
         success: false,
-        error: 'Please provide a valid query string.',
+        error: 'Please provide a question between 1 and 2000 characters.',
       });
     }
+    if (documentId !== null && typeof documentId !== 'string') {
+      return res.status(400).json({ success: false, error: 'documentId must be a string or null.' });
+    }
+    if (documentId && !getDocumentById(documentId)) {
+      return res.status(404).json({ success: false, error: 'Document not found.' });
+    }
 
-    const parsedTopK = Math.max(1, Math.min(Number(topK) || 5, 20));
+    const parsedTopK = getTopK(topK);
 
     // Set SSE headers
     res.setHeader('Content-Type', 'text/event-stream');
@@ -75,10 +95,10 @@ export async function askQuestionStream(req, res) {
     res.flushHeaders?.();
 
     // 1. Embed query
-    const queryVector = await generateQueryEmbedding(query.trim());
+    const { embedding: queryVector } = await generateQueryEmbedding(query.trim());
 
     // 2. Retrieve chunks
-    const retrievedChunks = await querySimilarChunks(queryVector, parsedTopK, documentId || null);
+    const retrievedChunks = await querySimilarChunks(queryVector, parsedTopK, documentId || null, query.trim());
 
     // Send retrieved sources first
     res.write(`data: ${JSON.stringify({ type: 'sources', sources: retrievedChunks })}\n\n`);
@@ -87,7 +107,6 @@ export async function askQuestionStream(req, res) {
     await streamRAGAnswer({
       query: query.trim(),
       retrievedChunks,
-      conversationHistory: history,
       onToken: (token) => {
         res.write(`data: ${JSON.stringify({ type: 'token', content: token })}\n\n`);
       },
@@ -95,17 +114,17 @@ export async function askQuestionStream(req, res) {
         res.write(`data: ${JSON.stringify({ type: 'done', answer: result.answer, provider: result.provider })}\n\n`);
         res.end();
       },
-      onError: (err) => {
-        res.write(`data: ${JSON.stringify({ type: 'error', error: err.message })}\n\n`);
+      onError: () => {
+        res.write(`data: ${JSON.stringify({ type: 'error', error: 'Failed to answer the question. Please try again.' })}\n\n`);
         res.end();
       },
     });
   } catch (error) {
     console.error('[Query Stream Error]', error);
     if (!res.headersSent) {
-      return res.status(500).json({ success: false, error: error.message });
+      return res.status(500).json({ success: false, error: 'Failed to answer the question. Please try again.' });
     }
-    res.write(`data: ${JSON.stringify({ type: 'error', error: error.message })}\n\n`);
+    res.write(`data: ${JSON.stringify({ type: 'error', error: 'Failed to answer the question. Please try again.' })}\n\n`);
     res.end();
   }
 }

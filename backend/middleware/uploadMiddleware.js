@@ -6,13 +6,14 @@ import { v4 as uuidv4 } from 'uuid';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-const uploadDir = path.join(__dirname, '..', 'uploads');
+const uploadDir = path.resolve(
+  process.env.RAG_STORAGE_DIR?.trim() || path.join(__dirname, '..', 'uploads')
+);
 
 if (!fs.existsSync(uploadDir)) {
   fs.mkdirSync(uploadDir, { recursive: true });
 }
 
-// Disk storage configuration with unique sanitized filenames
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
     cb(null, uploadDir);
@@ -28,20 +29,23 @@ const storage = multer.diskStorage({
   },
 });
 
-// Allowed file types: PDF and TXT
 const fileFilter = (req, file, cb) => {
-  const allowedExts = ['.pdf', '.txt'];
-  const ext = path.extname(file.originalname).toLowerCase();
-  const allowedMimes = ['application/pdf', 'text/plain', 'application/octet-stream'];
+  const extension = path.extname(file.originalname).toLowerCase();
+  const mimeType = file.mimetype.toLowerCase();
+  const supportedTypes = {
+    '.pdf': ['application/pdf', 'application/x-pdf', 'application/octet-stream'],
+    '.txt': ['text/plain', 'application/octet-stream'],
+  };
 
-  if (allowedExts.includes(ext) || allowedMimes.includes(file.mimetype)) {
+  if (supportedTypes[extension]?.includes(mimeType)) {
     cb(null, true);
   } else {
-    cb(new Error(`Unsupported file format "${ext}". Only PDF and TXT files are allowed.`), false);
+    const error = new Error('Only PDF and TXT files are supported.');
+    error.status = 400;
+    cb(error, false);
   }
 };
 
-// 10 MB maximum file size limit
 export const upload = multer({
   storage,
   fileFilter,

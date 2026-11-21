@@ -1,0 +1,5 @@
+DATABASE_URL=postgresql://USER:PASSWORD@HOST/DATABASE?sslmode=require
+FRONTEND_ORIGIN=http://localhost:8787
+OPENAI_API_KEY=
+OPENAI_EMBEDDING_MODEL=text-embedding-3-small
+OPENAI_CHAT_MODEL=gpt-4o-mini

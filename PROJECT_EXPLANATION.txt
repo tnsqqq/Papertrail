@@ -1,0 +1,76 @@
+PAPERTRAIL - LOCAL DOCUMENT QUESTION ANSWERING
+==============================================
+
+PURPOSE
+-------
+
+Open the website on this computer, upload a PDF or TXT file, and ask questions
+about its contents. No account, sign-in, or permission step is required.
+
+The app uses retrieval-augmented generation (RAG): it extracts text, splits it
+into searchable chunks, retrieves relevant passages, and uses them to answer
+questions. Scanned PDFs are processed with local OCR.
+
+LOCAL-ONLY DESIGN
+-----------------
+
+The Vite frontend and Express API bind to 127.0.0.1. The app is designed for
+use on this computer and has no authentication. Do not expose either server
+to a local network or the internet.
+
+PROJECT PARTS
+-------------
+
+- frontend/: Vite, HTML, CSS, and JavaScript user interface.
+- backend/: Express API, PDF/TXT processing, OCR, embeddings, retrieval, and
+  answer generation.
+- backend/uploads/: uploaded files, document metadata, and the local vector
+  index.
+
+RUNNING THE APP
+---------------
+
+Start the backend in one terminal:
+
+    cd backend
+    npm install
+    npm run dev
+
+Start the frontend in another terminal:
+
+    cd frontend
+    npm install
+    npm run dev
+
+Open http://localhost:3000.
+
+The app works without model API keys or ChromaDB by using local fallback
+services. OPENAI_API_KEY or GEMINI_API_KEY can be configured in backend/.env
+for model-generated answers. OCR runs locally using the bundled English model.
+
+DOCUMENT WORKFLOW
+-----------------
+
+1. Multer accepts PDF or TXT uploads up to 10 MB.
+2. The backend extracts text, using local OCR for scanned PDF pages as needed.
+3. Text is split into overlapping chunks and converted to embeddings.
+4. ChromaDB is used when available; otherwise the local JSON vector index is
+   used.
+5. Questions retrieve matching chunks and produce an answer.
+6. Uploaded files, metadata, and the vector index persist under the backend
+   storage directory.
+
+MAIN API ROUTES
+---------------
+
+GET    /health
+GET    /api/status
+GET    /api/documents
+POST   /api/documents/upload
+GET    /api/documents/:id
+DELETE /api/documents/:id
+POST   /api/query
+POST   /api/query/stream
+
+The app keeps data local, but its API has no login or account checks. Keep
+both development servers bound to 127.0.0.1.

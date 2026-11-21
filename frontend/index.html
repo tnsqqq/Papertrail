@@ -1,65 +1,103 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Document Q&A</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="./src/style.css">
-</head>
-<body>
-  <div class="container">
-    
-    <!-- Simple Header -->
-    <header class="header">
-      <h1>Document Q&A</h1>
-      <p class="subtitle">Upload a PDF or TXT file and ask questions about it.</p>
-    </header>
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="Ask questions about your documents and get clear answers grounded in their contents.">
+    <meta name="theme-color" content="#f5f7f5">
+    <title>Papertrail — Document Q&amp;A</title>
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+    <link rel="apple-touch-icon" href="/favicon.svg">
+    <link rel="stylesheet" href="./src/style.css">
+  </head>
+  <body>
+    <div class="app-shell" id="app-shell">
+      <aside class="sidebar" aria-label="Document library">
+        <a class="brand" href="/" aria-label="Papertrail home">
+          <span class="brand-mark" aria-hidden="true">P</span>
+          <span class="brand-name">papertrail<span>.</span></span>
+        </a>
 
-    <!-- 1. Upload Section -->
-    <div class="card upload-section">
-      <div class="upload-row">
-        <label for="file-input" class="btn btn-secondary" id="choose-file-btn">
-          <span>Choose File</span>
-          <input type="file" id="file-input" accept=".pdf,.txt">
-        </label>
-        <span class="file-name" id="selected-file-label">No file selected</span>
-        <button class="btn btn-primary" id="btn-upload" disabled>Upload</button>
-      </div>
-      <div class="upload-status" id="upload-status"></div>
-      
-      <!-- Currently Loaded Documents -->
-      <div class="docs-loaded" id="docs-loaded" style="display: none;">
-        <span class="docs-label">Active Document:</span>
-        <span class="doc-badge" id="active-doc-name">—</span>
-      </div>
-    </div>
-
-    <!-- 2. Question Input Section -->
-    <div class="card question-section">
-      <form id="question-form">
-        <div class="input-row">
-          <input 
-            type="text" 
-            id="question-input" 
-            placeholder="Ask a question about your document..." 
-            autocomplete="off"
-            required
-          >
-          <button type="submit" class="btn btn-primary" id="btn-ask">Ask</button>
+        <div class="library-heading">
+          <span>My documents</span>
+          <span class="document-count" id="document-count">0</span>
         </div>
-      </form>
+
+        <label class="upload-dropzone" id="upload-dropzone" for="file-input">
+          <span class="upload-icon" aria-hidden="true">+</span>
+          <span class="upload-copy">
+            <strong>Add a document</strong>
+            <small>PDF or TXT · up to 5 MB · demo files expire in 24 hours</small>
+          </span>
+          <input type="file" id="file-input" accept=".pdf,.txt,application/pdf,text/plain">
+        </label>
+        <div class="upload-status" id="upload-status" role="status" aria-live="polite"></div>
+        <nav class="documents-list" id="documents-list" aria-label="Choose a document">
+          <p class="library-empty" id="library-empty">Your documents will appear here.</p>
+        </nav>
+
+        <div class="sidebar-footer">
+          <span class="connection-dot" id="connection-dot"></span>
+          <span id="connection-status" role="status">Connecting to your workspace…</span>
+        </div>
+      </aside>
+
+      <main class="main-content">
+        <header class="topbar">
+          <div>
+            <p class="eyebrow">DOCUMENT ASSISTANT</p>
+            <h1>Ask your documents</h1>
+            <p class="topbar-description">Upload a PDF or text file, then ask questions about it.</p>
+          </div>
+          <div class="topbar-actions">
+            <button type="button" class="new-chat-button" id="new-chat" hidden>New chat</button>
+            <div class="active-scope" id="active-scope">All documents</div>
+            <button type="button" class="theme-toggle" id="theme-toggle" aria-label="Switch to dark mode" title="Switch to dark mode">
+              <span class="theme-icon theme-icon-light" aria-hidden="true">☼</span>
+              <span class="theme-icon theme-icon-dark" aria-hidden="true">☾</span>
+            </button>
+          </div>
+        </header>
+
+        <section class="conversation" id="answers-container" aria-live="polite" aria-label="Conversation">
+          <div class="welcome-card" id="welcome-card">
+            <span class="welcome-mark" aria-hidden="true">✳</span>
+            <h2>Your document assistant.</h2>
+            <p>Upload a PDF or text file, then ask a question to get a clear answer grounded in its contents.</p>
+            <div class="suggestion-list" aria-label="Suggested questions">
+              <button type="button" class="suggestion-button" data-question="Summarize the key points from my documents.">✳ <span>Summarize key points</span></button>
+              <button type="button" class="suggestion-button" data-question="What are the most important things I should know from this document?">✧ <span>Key takeaways</span></button>
+              <button type="button" class="suggestion-button" data-question="List the action items and recommendations in this document.">↗ <span>Find action items</span></button>
+            </div>
+          </div>
+        </section>
+
+        <form class="question-form" id="question-form">
+          <label class="visually-hidden" for="question-input">Your question</label>
+          <textarea
+            id="question-input"
+            rows="1"
+            maxlength="2000"
+            placeholder="Ask a question about your documents…"
+            autocomplete="off"
+            disabled
+            required
+          ></textarea>
+          <div class="composer-footer">
+            <span id="composer-hint">Upload a document to get started.</span>
+            <span class="composer-actions">
+              <span class="character-count" id="character-count">0 / 2000</span>
+              <button type="submit" class="ask-button" id="btn-ask" disabled>
+                <span>Ask</span>
+                <span aria-hidden="true">↗</span>
+              </button>
+            </span>
+          </div>
+        </form>
+        <p class="privacy-note">Answers are generated from your documents and may need verification.</p>
+      </main>
     </div>
 
-    <!-- 3. Answers Feed -->
-    <div class="answers-section" id="answers-container">
-      <!-- Answers will appear here -->
-    </div>
-
-  </div>
-
-  <script type="module" src="./src/main.js"></script>
-</body>
+    <script type="module" src="./src/main.js"></script>
+  </body>
 </html>

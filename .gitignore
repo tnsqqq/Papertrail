@@ -3,4 +3,11 @@ node_modules/
 **/.env
 .vite/
 dist/
+dist-worker/
+.kilo/
+.neon
 __pycache__/
+backend/uploads/*
+!backend/uploads/.gitkeep
+**/usage_analytics.json
+**/usage_analytics.json.*.tmp

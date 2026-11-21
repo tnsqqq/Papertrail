@@ -8,16 +8,24 @@
     "start": "node server.js",
     "dev": "node --watch server.js",
     "chroma": "python -c \"import sys; from chromadb.cli.cli import app; sys.argv=['chroma', 'run', '--path', './chroma_data', '--port', '8000']; app()\"",
-    "test": "node test-rag.js"
+    "test": "node --test test/localDocumentStore.test.js test/localAccess.test.js test/chunkingService.test.js test/ragService.test.js test/retrievalService.test.js test/pdfService.test.js",
+    "test:integration": "node test-rag.js"
   },
   "dependencies": {
+    "@napi-rs/canvas": "^1.1.1",
+    "@tesseract.js-data/eng": "^1.0.0",
+    "canvas": "^3.2.3",
     "chromadb": "^3.5.0",
     "cors": "^2.8.5",
     "dotenv": "^16.4.7",
     "express": "^4.21.2",
+    "express-rate-limit": "^8.7.4",
+    "helmet": "^8.3.0",
     "multer": "^1.4.5-lts.1",
     "openai": "^4.86.1",
     "pdf-parse": "^1.1.1",
+    "pdfjs-dist": "4.8.69",
+    "tesseract.js": "^6.0.1",
     "uuid": "^11.1.0"
   },
   "keywords": [
@@ -30,5 +38,8 @@
     "document-qa"
   ],
   "author": "",
-  "license": "MIT"
+  "license": "MIT",
+  "devDependencies": {
+    "pdfkit": "^0.20.2"
+  }
 }

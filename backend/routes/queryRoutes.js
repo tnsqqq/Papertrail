@@ -3,10 +3,8 @@ import { askQuestion, askQuestionStream } from '../controllers/queryController.j
 
 const router = express.Router();
 
-// Standard JSON QA endpoint
 router.post('/', askQuestion);
 
-// Streaming SSE QA endpoint
 router.post('/stream', askQuestionStream);
 
 export default router;

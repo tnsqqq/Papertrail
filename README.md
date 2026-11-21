@@ -1,87 +1,65 @@
-# RAG Chatbot
+# Papertrail - Public Document Q&A
 
-A small document question-answering app built with Node.js, Express, OpenAI embeddings, ChromaDB, and a Vite frontend.
+Papertrail is a document assistant that answers questions about uploaded PDF and TXT files using retrieval-augmented generation.
 
-Upload a PDF or TXT file, index its contents, and ask questions using natural-language search.
+The public demo has no login or sign-up. It uses Cloudflare Pages, Cloudflare Workers, KV rate limits, and Neon Postgres with pgvector. Demo uploads expire after 24 hours.
 
-## Features
+## Live deployment
 
-- Upload PDF and TXT documents
-- Split documents into searchable chunks
-- Generate embeddings for semantic search
-- Query documents with AI-generated answers
-- Optional ChromaDB vector storage
-- Local fallback vector storage for development
-- Simple Vite frontend
+- Portfolio: https://papertrail-e2c.pages.dev
+- API: https://papertrail-api.tnsqqqbaliyan.workers.dev
 
-## Requirements
+## Run locally
 
-- Node.js 18+
-- Python 3.9+ for ChromaDB
-- OpenAI API key
+Requirements: Node.js 18 or newer and npm.
 
-## Setup
-
-### Backend
-
-```bash
+```powershell
 cd backend
 npm install
-```
-
-Create a `.env` file:
-
-```env
-OPENAI_API_KEY=your_api_key_here
-PORT=5000
-CHROMA_URL=http://localhost:8000
-```
-
-Start ChromaDB:
-
-```bash
-npm run chroma
-```
-
-Start the backend:
-
-```bash
 npm run dev
 ```
 
-### Frontend
+In another terminal:
 
-Open a second terminal:
-
-```bash
+```powershell
 cd frontend
 npm install
 npm run dev
 ```
 
-Open the frontend URL shown by Vite, usually:
+Open http://localhost:3000.
 
-```text
-http://localhost:3000
-```
+Set `OPENAI_API_KEY` or `GEMINI_API_KEY` in `backend/.env` for model-generated answers. Without model keys, the app uses concise extractive answers. Scanned PDFs use local OCR; the cloud deployment accepts only PDFs with selectable text.
 
-## API Endpoints
+## Cloud deployment
 
-- `GET /health` - Health check
-- `GET /api/status` - System status
-- `POST /api/documents/upload` - Upload a document
-- `GET /api/documents` - List documents
-- `DELETE /api/documents/:id` - Delete a document
-- `POST /api/query` - Ask a question
-- `POST /api/query/stream` - Ask a question with streaming output
+See [DEPLOYMENT.md](./DEPLOYMENT.md) for Cloudflare Pages, Workers, KV, Neon, and pgvector setup.
 
-## Testing
+## Public protections
 
-```bash
+- PDF/TXT files only
+- 5 MB maximum file size
+- 3 uploads per IP per hour
+- 30 queries per IP per hour
+- Automatic deletion after 24 hours
+- No login or account system
+
+## API
+
+- `GET /health`
+- `GET /api/status`
+- `GET /api/documents`
+- `POST /api/documents/upload`
+- `DELETE /api/documents/:id`
+- `POST /api/query`
+
+## Tests
+
+```powershell
 cd backend
 npm test
 ```
 
-## License
-
-MIT
+```powershell
+npm run build
+```
