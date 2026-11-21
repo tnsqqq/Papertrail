@@ -27,7 +27,11 @@ const allowedAnswerTags = [
   'a', 'blockquote', 'br', 'code', 'em', 'h1', 'h2', 'h3', 'li',
   'ol', 'p', 'pre', 'strong', 'ul',
 ];
-const apiBaseUrl = (import.meta.env.VITE_API_BASE_URL || '').replace(/\/+$/, '');
+const productionApiUrl = 'https://papertrail-api.tnsqqqbaliyan.workers.dev';
+const apiBaseUrl = (
+  import.meta.env.VITE_API_BASE_URL ||
+  (import.meta.env.PROD ? productionApiUrl : '')
+).replace(/\/+$/, '');
 
 function apiUrl(path) {
   return `${apiBaseUrl}${path}`;
